@@ -6,10 +6,10 @@ const LRU = require("../index");
 const gccache = new LRU;
 const onemb = new Int8Array(1000000);
 it("large items", function () {
-    gccache.set("item1", onemb);
-    gccache.set("item2", new Int8Array(5000000));
-    gccache.set("item3", new Int8Array(25000000));
-    assert.equal(gccache.get("item1"), onemb);
+    gccache.set("1mb", onemb);
+    gccache.set("5mb", new Int8Array(5000000));
+    gccache.set("25mb", new Int8Array(25000000));
+    assert.equal(gccache.get("1mb"), onemb);
 });
 it("negative", function () {
     assert.throws(function () {
@@ -90,13 +90,13 @@ it("iterators", function () {
     assert.equal(eit.next().done, true);
 });
 it("gc", function (cb) {
+    assert.equal(gccache.get("1mb"), onemb);
     if (gccache.size < 3)
         cb();
     else
         setTimeout(function () {
             if (gccache.size >= 3)
                 console.warn("31mb of data was not cleared during this run, weak references may not be working");
-            assert.equal(gccache.get("test1"), onemb);
             cb();
         }, 1900);
 });
