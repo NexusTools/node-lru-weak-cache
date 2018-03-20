@@ -4,10 +4,12 @@ require("source-map-support").install();
 const assert = require("assert");
 const LRU = require("../index");
 const gccache = new LRU;
+const onemb = new Int8Array(1000000);
 it("large items", function () {
-    gccache.set("item1", new Int8Array(1000000));
+    gccache.set("item1", onemb);
     gccache.set("item2", new Int8Array(5000000));
     gccache.set("item3", new Int8Array(25000000));
+    assert.equal(gccache.get("item1"), onemb);
 });
 it("negative", function () {
     assert.throws(function () {
@@ -55,10 +57,10 @@ it("generate", function (cb) {
     var remaining = 200;
     for (var i = 0; i < 200; i++) {
         cache.generate("test", generator, function (err, res) {
-            assert.equal(JSON.stringify(res), JSON.stringify(first));
+            assert.equal(res, first);
             if (!--remaining) {
                 cache.generate("test", undefined, function (err, value) {
-                    assert.equal(JSON.stringify(value), JSON.stringify(first));
+                    assert.equal(value, first);
                     cache.clear();
                     assert.equal(cache.size, 0);
                     cache.generate("test", function (key, cb) {
@@ -72,6 +74,21 @@ it("generate", function (cb) {
         });
     }
 });
+it("iterators", function () {
+    const val = new Object;
+    const cache = new LRU;
+    cache.set("item", val);
+    cache.forEach(function (v, key) {
+        assert.equal(v, val);
+        assert.equal(key, "item");
+    });
+    const vit = cache.values();
+    assert.equal(vit.next().value, val);
+    assert.equal(vit.next().done, true);
+    const eit = cache.entries();
+    assert.equal(eit.next().value[1], val);
+    assert.equal(eit.next().done, true);
+});
 it("gc", function (cb) {
     if (gccache.size < 3)
         cb();
@@ -79,6 +96,7 @@ it("gc", function (cb) {
         setTimeout(function () {
             if (gccache.size >= 3)
                 console.warn("31mb of data was not cleared during this run, weak references may not be working");
+            assert.equal(gccache.get("test1"), onemb);
             cb();
         }, 1900);
 });

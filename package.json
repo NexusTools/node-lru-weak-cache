@@ -1,6 +1,6 @@
 {
   "name": "lru-weak-cache",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A caching Map<string, ?> that deletes the least-recently-accessed items with weak references.",
   "main": "index.js",
   "scripts": {
@@ -8,7 +8,10 @@
     "test-coverage": "node node_modules/istanbul/lib/cli cover node_modules/mocha/bin/_mocha -- --bail --reporter spec --check-leaks test/",
     "test-travis": "istanbul cover node_modules/mocha/bin/_mocha --report lcovonly -- --reporter spec --check-leaks test/"
   },
-  "author": "",
+  "author": "NexusTools <contact@nexustools.com>",
+  "contributors": [
+      "Katelyn Slater <kate@nexustools.com>"
+  ],
   "license": "Apache-2.0",
   "devDependencies": {
     "@types/weak": "^1.0.0",

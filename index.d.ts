@@ -24,14 +24,14 @@ declare const _default: {
         makeDestruct(key: string): () => void;
         set(key: string, value: V): any;
         get(key: string): V;
-        generate(key: string, generator: (key: string, callback: (err: Error, value?: V) => void) => void, callback: (err: Error, value?: V) => void): void;
         forEach(callbackfn: (value: V, key: string, map: Map<string, V>) => void, thisArg?: any): void;
+        generate(key: string, generator: (key: string, callback: (err: Error, value?: V) => void) => void, callback: (err: Error, value?: V) => void): void;
+        entries(): IterableIterator<[string, V]>;
+        values(): IterableIterator<V>;
         has(key: string): boolean;
         readonly size: number;
         [Symbol.iterator](): IterableIterator<[string, V]>;
-        entries(): IterableIterator<[string, V]>;
         keys(): IterableIterator<string>;
-        values(): IterableIterator<V>;
         readonly [Symbol.toStringTag]: "Map";
     };
 };

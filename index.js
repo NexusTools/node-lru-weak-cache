@@ -75,7 +75,6 @@ module.exports = class LRUWeakCache extends Map {
         const self = this;
         const destructor = this.makeDestruct(key);
         this.destructors[key] = destructor;
-        value = weak(value, destructor);
         const timeouts = this.timeouts;
         if (timeouts) {
             try {
@@ -88,22 +87,37 @@ module.exports = class LRUWeakCache extends Map {
             this.accesses[key] = +new Date;
         }
         catch (e) { }
-        return super.set(key, value);
+        return super.set(key, weak(value, destructor));
     }
     get(key) {
         const val = super.get(key);
-        if (this.retimeOnAccess)
+        if (val) {
+            if (this.retimeOnAccess)
+                try {
+                    const timeouts = this.timeouts;
+                    clearTimeout(timeouts[key]);
+                    timeouts[key] = setTimeout(this.destructors[key], this.timeout);
+                }
+                catch (e) { }
             try {
-                const timeouts = this.timeouts;
-                clearTimeout(timeouts[key]);
-                timeouts[key] = setTimeout(this.destructors[key], this.timeout);
+                this.accesses[key] = +new Date;
             }
             catch (e) { }
-        try {
-            this.accesses[key] = +new Date;
+            try {
+                return weak.get(val);
+            }
+            catch (e) { }
         }
-        catch (e) { }
         return val;
+    }
+    forEach(callbackfn, thisArg) {
+        super.forEach(function (value, key, map) {
+            try {
+                value = weak.get(value);
+            }
+            catch (e) { }
+            callbackfn.call(this, value, key, map);
+        }, thisArg);
     }
     generate(key, generator, callback) {
         const val = this.get(key);
@@ -132,6 +146,32 @@ module.exports = class LRUWeakCache extends Map {
         }
         else
             callback(undefined, val);
+    }
+    entries() {
+        const it = super.entries();
+        const next = it.next;
+        it.next = function () {
+            const n = next.apply(it, arguments);
+            try {
+                n.value[1] = weak.get(n.value[1]);
+            }
+            catch (e) { }
+            return n;
+        };
+        return it;
+    }
+    values() {
+        const it = super.values();
+        const next = it.next;
+        it.next = function () {
+            const n = next.apply(it, arguments);
+            try {
+                n.value = weak.get(n.value);
+            }
+            catch (e) { }
+            return n;
+        };
+        return it;
     }
 };
 //# sourceMappingURL=index.js.map

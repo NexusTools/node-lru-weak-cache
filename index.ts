@@ -77,7 +77,6 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
     const self = this;
     const destructor = this.makeDestruct(key);
     this.destructors[key] = destructor;
-    value = weak(value, destructor) as any;
     const timeouts = this.timeouts;
     if(timeouts) {
       try {clearTimeout(timeouts[key]);} catch(e) {}
@@ -86,20 +85,33 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
     try {
       this.accesses[key] = +new Date;
     } catch(e) {}
-    return super.set(key, value);
+    return super.set(key, weak(value, destructor) as any);
 	}
   get(key: string): V{
     const val = super.get(key);
-    if(this.retimeOnAccess)
+    if(val) {
+      if(this.retimeOnAccess)
+        try {
+          const timeouts = this.timeouts;
+          clearTimeout(timeouts[key]);
+          timeouts[key] = setTimeout(this.destructors[key], this.timeout);
+        } catch(e) {}
       try {
-        const timeouts = this.timeouts;
-        clearTimeout(timeouts[key]);
-        timeouts[key] = setTimeout(this.destructors[key], this.timeout);
+        this.accesses[key] = +new Date;
       } catch(e) {}
-    try {
-      this.accesses[key] = +new Date;
-    } catch(e) {}
+      try {
+        return weak.get(val);
+      } catch(e) {}
+    }
     return val;
+  }
+  forEach(callbackfn: (value: V, key: string, map: Map<string, V>) => void, thisArg?: any) {
+    super.forEach(function(value, key, map) {
+      try {
+        value = weak.get(value);
+      } catch(e) {}
+      callbackfn.call(this, value, key, map);
+    }, thisArg);
   }
   generate(key: string, generator: (key: string, callback: (err: Error, value?: V) => void) => void, callback: (err: Error, value?: V) => void) {
     const val = this.get(key);
@@ -127,5 +139,29 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
       }
     } else
       callback(undefined, val);
+  }
+  entries(): IterableIterator<[string, V]>{
+      const it = super.entries();
+      const next = it.next;
+      (it as any).next = function() {
+        const n = next.apply(it, arguments);
+        try {
+          n.value[1] = weak.get(n.value[1]);
+        } catch(e) {}
+        return n;
+      }
+      return it;
+  }
+  values(): IterableIterator<V>{
+    const it = super.values();
+    const next = it.next;
+    (it as any).next = function() {
+      const n = next.apply(it, arguments);
+      try {
+        n.value = weak.get(n.value);
+      } catch(e) {}
+      return n;
+    }
+    return it;
   }
 }
