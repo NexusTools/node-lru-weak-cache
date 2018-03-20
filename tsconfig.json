@@ -1,0 +1,21 @@
+{
+    "compileOnSave": true,
+    "compilerOptions": {
+      "target": "ES6",
+      "declaration": true,
+      "module": "commonjs",
+      "removeComments": true,
+      "preserveConstEnums": true,
+      "moduleResolution": "node",
+      "skipLibCheck": true,
+      "sourceMap": true
+    },
+    "files": [
+        "index.ts",
+        "test/tests.ts"
+    ],
+    "exclude": [
+        "node_modules/**",
+        "**/*.spec.ts"
+    ]
+}
