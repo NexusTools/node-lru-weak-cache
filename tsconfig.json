@@ -2,7 +2,6 @@
     "compileOnSave": true,
     "compilerOptions": {
       "target": "ES6",
-      "declaration": true,
       "module": "commonjs",
       "removeComments": true,
       "preserveConstEnums": true,
@@ -12,6 +11,7 @@
     },
     "files": [
         "index.ts",
+        "index.d.ts",
         "test/tests.ts"
     ],
     "exclude": [

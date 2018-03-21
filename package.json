@@ -1,6 +1,6 @@
 {
   "name": "lru-weak-cache",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A caching Map<string, ?> that deletes the least-recently-accessed items with weak references.",
   "main": "index.js",
   "scripts": {
@@ -12,6 +12,7 @@
   "contributors": [
       "Katelyn Slater <kate@nexustools.com>"
   ],
+  "typings": "./index.d.ts",
   "license": "Apache-2.0",
   "devDependencies": {
     "@types/weak": "^1.0.0",
