@@ -13,14 +13,6 @@ it("large items", function() {
   gccache.set("25mb", new Int8Array(25000000)); // 25mb
   assert.equal(gccache.get("1mb"), onemb);
 });
-it("negative", function () {
-  assert.throws(function() {
-    new LRU({timeout:-1});
-  }, "negative timeout did not throw error");
-  assert.throws(function() {
-    new LRU({capacity:-1});
-  }, "negative capacity did not throw error");
-});
 it("capacity", function () {
   const refs = [];
   const cache = new LRU({capacity:5});
@@ -91,6 +83,32 @@ it("iterators", function() {
   const eit = cache.entries();
   assert.equal(eit.next().value[1], val);
   assert.equal(eit.next().done, true);
+});
+it("lifetime", function(cb) {
+  const refs = [];
+  const cache = new LRU({timeout:500,lifetime:400,reliveOnAccess:true,retimeOnAccess:true});
+  for(var i=0; i<10; i++) {
+    const obj = new Int8Array(100000);
+    cache.set("item" + i, obj);
+    refs.push(obj);
+  }
+  assert.equal(cache.size, 10);
+  setTimeout(function() {
+    assert.equal(cache.size, 10);
+  }, 350);
+  assert.equal(cache.size, 10);
+  setTimeout(function() {
+    for(var i=0; i<10; i++) {
+      cache.get("item" + i);
+    }
+    setTimeout(function() {
+      assert.equal(cache.size, 10);
+    }, 200);
+    setTimeout(function() {
+      assert.equal(cache.size, 0);
+      cb();
+    }, 550);
+  }, 450);
 });
 // Test if 25mb weak item was gc'd
 it("gc", function(cb) {

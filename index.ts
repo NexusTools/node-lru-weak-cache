@@ -5,27 +5,30 @@ import weak = require("weak");
 export = class LRUWeakCache<V extends object> extends Map<string, V> {
   private accesses: {[index: string]: number};
   private timeouts: {[index: string]: number};
-  private destructors: {[index: string]: Function} = {};
+  private weakeners: {[index: string]: number};
+  private destructors: {[index: string]: () => void} = {};
   private generateQueue: {[index: string]: ((err: Error, value?: V) => void)[]} = {};
   private retimeOnAccess: boolean;
+  private reliveOnAccess: boolean;
+  private lifetime: number;
   private capacity: number;
   private timeout: number;
 
-  constructor(options: {timeout?: number,capacity?: number,retimeOnAccess?:boolean} = {}) {
+  constructor(options: number | {timeout?:number,capacity?:number,lifetime?:number,retimeOnAccess?:boolean,reliveOnAccess?:boolean} = 200) {
     super();
+    if(typeof options === "number")
+      options = {capacity:options};
+    this.reliveOnAccess = options.reliveOnAccess;
     this.retimeOnAccess = options.retimeOnAccess;
+    this.lifetime = options.lifetime;
     this.capacity = options.capacity;
     this.timeout = options.timeout;
-    if(this.timeout) {
-      if(this.timeout < 0)
-        throw new Error("timeout cannot be negative");
+    if(this.lifetime > 0)
+      this.weakeners = {};
+    if(this.timeout > 0)
       this.timeouts = {};
-    }
-    if(this.capacity) {
-      if(this.capacity < 0)
-        throw new Error("capacity cannot be negative");
+    if(this.capacity > 0)
       this.accesses = {};
-    }
   }
 	clear(): void {
     this.destructors = {};
@@ -35,6 +38,13 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
         try{clearTimeout(timeouts[key]);}catch(e){}
       });
       this.timeouts = {};
+    } catch(e) {}
+    try {
+      const weakeners = this.weakeners;
+      Object.keys(weakeners).forEach(function(key) {
+        try{clearTimeout(weakeners[key]);}catch(e){}
+      });
+      this.weakeners = {};
     } catch(e) {}
     try {
       this.accesses = {};
@@ -85,16 +95,35 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
     try {
       this.accesses[key] = +new Date;
     } catch(e) {}
-    return super.set(key, weak(value, destructor) as any);
+    try {
+      const weakeners = this.weakeners;
+      try {clearTimeout(weakeners[key]);} catch(e) {}
+      weakeners[key] = setTimeout(function() {
+        Map.prototype.set.call(self, key, weak(value, destructor) as any);
+      }, this.lifetime) as any;
+      return super.set(key, value);
+    } catch(e) {
+      return super.set(key, weak(value, destructor) as any);
+    }
 	}
   get(key: string): V{
-    const val = super.get(key);
+    var val = super.get(key);
     if(val) {
       if(this.retimeOnAccess)
         try {
           const timeouts = this.timeouts;
           clearTimeout(timeouts[key]);
-          timeouts[key] = setTimeout(this.destructors[key], this.timeout);
+          timeouts[key] = setTimeout(this.destructors[key], this.timeout) as any;
+        } catch(e) {}
+      if(this.reliveOnAccess)
+        try {
+          const self = this;
+          const weakeners = this.weakeners;
+          try {super.set(key, val = weak.get(val));} catch(e) {}
+          clearTimeout(weakeners[key]);
+          weakeners[key] = setTimeout(function() {
+            Map.prototype.set.call(self, key, weak(val, self.destructors[key]) as any);
+          }, this.lifetime) as any;
         } catch(e) {}
       try {
         this.accesses[key] = +new Date;

@@ -1,23 +1,23 @@
 "use strict";
 const weak = require("weak");
 module.exports = class LRUWeakCache extends Map {
-    constructor(options = {}) {
+    constructor(options = 200) {
         super();
         this.destructors = {};
         this.generateQueue = {};
+        if (typeof options === "number")
+            options = { capacity: options };
+        this.reliveOnAccess = options.reliveOnAccess;
         this.retimeOnAccess = options.retimeOnAccess;
+        this.lifetime = options.lifetime;
         this.capacity = options.capacity;
         this.timeout = options.timeout;
-        if (this.timeout) {
-            if (this.timeout < 0)
-                throw new Error("timeout cannot be negative");
+        if (this.lifetime > 0)
+            this.weakeners = {};
+        if (this.timeout > 0)
             this.timeouts = {};
-        }
-        if (this.capacity) {
-            if (this.capacity < 0)
-                throw new Error("capacity cannot be negative");
+        if (this.capacity > 0)
             this.accesses = {};
-        }
     }
     clear() {
         this.destructors = {};
@@ -30,6 +30,17 @@ module.exports = class LRUWeakCache extends Map {
                 catch (e) { }
             });
             this.timeouts = {};
+        }
+        catch (e) { }
+        try {
+            const weakeners = this.weakeners;
+            Object.keys(weakeners).forEach(function (key) {
+                try {
+                    clearTimeout(weakeners[key]);
+                }
+                catch (e) { }
+            });
+            this.weakeners = {};
         }
         catch (e) { }
         try {
@@ -87,16 +98,43 @@ module.exports = class LRUWeakCache extends Map {
             this.accesses[key] = +new Date;
         }
         catch (e) { }
-        return super.set(key, weak(value, destructor));
+        try {
+            const weakeners = this.weakeners;
+            try {
+                clearTimeout(weakeners[key]);
+            }
+            catch (e) { }
+            weakeners[key] = setTimeout(function () {
+                Map.prototype.set.call(self, key, weak(value, destructor));
+            }, this.lifetime);
+            return super.set(key, value);
+        }
+        catch (e) {
+            return super.set(key, weak(value, destructor));
+        }
     }
     get(key) {
-        const val = super.get(key);
+        var val = super.get(key);
         if (val) {
             if (this.retimeOnAccess)
                 try {
                     const timeouts = this.timeouts;
                     clearTimeout(timeouts[key]);
                     timeouts[key] = setTimeout(this.destructors[key], this.timeout);
+                }
+                catch (e) { }
+            if (this.reliveOnAccess)
+                try {
+                    const self = this;
+                    const weakeners = this.weakeners;
+                    try {
+                        super.set(key, val = weak.get(val));
+                    }
+                    catch (e) { }
+                    clearTimeout(weakeners[key]);
+                    weakeners[key] = setTimeout(function () {
+                        Map.prototype.set.call(self, key, weak(val, self.destructors[key]));
+                    }, this.lifetime);
                 }
                 catch (e) { }
             try {
