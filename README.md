@@ -10,10 +10,10 @@ npm install lru-weak-cache
 ```
 
 ```typescript
-declare interface CacheGenerator<V extends Object> {
+declare interface CacheGenerator<V extends object> {
   (key: string, callback: (err: Error, value?: V) => void): void;
 }
-declare interface CacheMultiGenerator<V extends Object> {
+declare interface CacheMultiGenerator<V extends object> {
   (keys: string[], callback: (err: Error, ret?: {[key: string]: V}) => void): void;
 }
 

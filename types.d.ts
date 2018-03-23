@@ -1,9 +1,9 @@
 /// <reference types="node" />
 
-export interface CacheGenerator<V extends Object> {
+export interface CacheGenerator<V extends object> {
   (key: string, callback: (err: Error, value?: V) => void): void;
 }
-export interface CacheMultiGenerator<V extends Object> {
+export interface CacheMultiGenerator<V extends object> {
   (keys: string[], callback: (err: Error, ret?: {[key: string]: V}) => void): void;
 }
 
