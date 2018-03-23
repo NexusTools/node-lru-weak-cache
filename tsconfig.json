@@ -12,6 +12,7 @@
     "files": [
         "index.ts",
         "index.d.ts",
+        "types.d.ts",
         "test/tests.ts"
     ],
     "exclude": [

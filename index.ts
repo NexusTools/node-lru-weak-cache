@@ -1,31 +1,30 @@
 /// <reference types="node" />
 
+import { LRUWeakCache as ILRUWeakCache, CacheGenerator, CacheMultiGenerator } from "./types";
 import weak = require("weak");
 
-export = class LRUWeakCache<V extends object> extends Map<string, V> {
+export = class LRUWeakCache<V extends object> extends Map<string, V> implements ILRUWeakCache<V> {
   private accesses: {[index: string]: number};
   private timeouts: {[index: string]: number};
   private weakeners: {[index: string]: number};
   private destructors: {[index: string]: () => void} = {};
   private generateQueue: {[index: string]: ((err: Error, value?: V) => void)[]} = {};
-  private retimeOnAccess: boolean;
-  private reliveOnAccess: boolean;
-  private lifetime: number;
+  private resetTimersOnAccess: boolean;
   private capacity: number;
-  private timeout: number;
+  private minAge: number;
+  private maxAge: number;
 
-  constructor(options: number | {timeout?:number,capacity?:number,lifetime?:number,retimeOnAccess?:boolean,reliveOnAccess?:boolean} = 200) {
+  constructor(options: number | {maxAge?:number,minAge?:number,capacity?:number,resetTimersOnAccess?:boolean} = 200) {
     super();
     if(typeof options === "number")
       options = {capacity:options};
-    this.reliveOnAccess = options.reliveOnAccess;
-    this.retimeOnAccess = options.retimeOnAccess;
-    this.lifetime = options.lifetime;
+    this.resetTimersOnAccess = options.resetTimersOnAccess;
     this.capacity = options.capacity;
-    this.timeout = options.timeout;
-    if(this.lifetime > 0)
+    this.minAge = options.minAge;
+    this.maxAge = options.maxAge;
+    if(this.minAge > 0)
       this.weakeners = {};
-    if(this.timeout > 0)
+    if(this.maxAge > 0)
       this.timeouts = {};
     if(this.capacity > 0)
       this.accesses = {};
@@ -90,7 +89,7 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
     const timeouts = this.timeouts;
     if(timeouts) {
       try {clearTimeout(timeouts[key]);} catch(e) {}
-      timeouts[key] = setTimeout(destructor, this.timeout) as any;
+      timeouts[key] = setTimeout(destructor, this.maxAge) as any;
     }
     try {
       this.accesses[key] = +new Date;
@@ -100,7 +99,7 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
       try {clearTimeout(weakeners[key]);} catch(e) {}
       weakeners[key] = setTimeout(function() {
         Map.prototype.set.call(self, key, weak(value, destructor) as any);
-      }, this.lifetime) as any;
+      }, this.minAge) as any;
       return super.set(key, value);
     } catch(e) {
       return super.set(key, weak(value, destructor) as any);
@@ -109,13 +108,12 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
   get(key: string): V{
     var val = super.get(key);
     if(val) {
-      if(this.retimeOnAccess)
+      if(this.resetTimersOnAccess) {
         try {
           const timeouts = this.timeouts;
           clearTimeout(timeouts[key]);
-          timeouts[key] = setTimeout(this.destructors[key], this.timeout) as any;
+          timeouts[key] = setTimeout(this.destructors[key], this.maxAge) as any;
         } catch(e) {}
-      if(this.reliveOnAccess)
         try {
           const self = this;
           const weakeners = this.weakeners;
@@ -123,8 +121,9 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
           clearTimeout(weakeners[key]);
           weakeners[key] = setTimeout(function() {
             Map.prototype.set.call(self, key, weak(val, self.destructors[key]) as any);
-          }, this.lifetime) as any;
+          }, this.minAge) as any;
         } catch(e) {}
+      }
       try {
         this.accesses[key] = +new Date;
       } catch(e) {}
@@ -142,24 +141,25 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
       callbackfn.call(this, value, key, map);
     }, thisArg);
   }
-  generate(key: string, generator: (key: string, callback: (err: Error, value?: V) => void) => void, callback: (err: Error, value?: V) => void) {
+  generate(key: string, generator: CacheGenerator<V>, callback: (err: Error, value?: V) => void) {
     const val = this.get(key);
     if(val === undefined) {
       const generateQueue = this.generateQueue;
-      var keyQueue = this.generateQueue[key];
+      var keyQueue = generateQueue[key];
       if(keyQueue)
         keyQueue.push(callback);
       else {
         const self = this;
-        keyQueue = this.generateQueue[key] = [callback];
+        keyQueue = generateQueue[key] = [callback];
         generator(key, function(err, value) {
-          delete self.generateQueue[key];
+          delete generateQueue[key];
           if (err)
             keyQueue.forEach(function(callback) {
               callback(err);
             });
           else {
-            self.set(key, value);
+            if (value)
+              self.set(key, value);
             keyQueue.forEach(function(callback) {
               callback(undefined, value);
             });
@@ -168,6 +168,101 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
       }
     } else
       callback(undefined, val);
+  }
+  generateMulti(keys: string[], generator: CacheMultiGenerator<V>, callback: (err: Error, ret?: { [key: string]: V }) => void): void {
+    if (keys.length) {
+      var remaining = keys.length;
+      const ret = {};
+      const done = function(key: string, val: V | Error) {
+        ret[key] = val;
+        if (!--remaining) {
+          var err: Error;
+          Object.keys(ret).forEach(function(key) {
+            const val = ret[key];
+            if(val instanceof Error) {
+              if(err) {
+                if(err.message !== val.message) {
+                  if (!err['multi']) {
+                    console.warn(err);
+                    err = new Error("Multiple errors occured, see log");
+                    err['multi'] = true;
+                  }
+                  console.warn(val);
+                }
+              } else
+                err = val;
+            }
+          });
+          if(err)
+            callback(err);
+          else
+            callback(undefined, ret);
+        }
+      };
+      const self = this;
+      const unusedKeys = [];
+      const generateQueue = this.generateQueue;
+      keys.forEach(function(key) {
+        const keyQueue = generateQueue[key];
+        if (keyQueue) {
+          keyQueue.push(function(err, value) {
+            done(key, err || value);
+          });
+        } else
+          unusedKeys.push(key);
+      });
+
+      if (unusedKeys.length) {
+        unusedKeys.forEach(function(key) {
+          generateQueue[key] = [];
+        });
+        const finished = function(ret) {
+          unusedKeys.forEach(function(key) {
+            const value = ret[key];
+            const isError = value instanceof Error;
+            if (!isError && value)
+              self.set(key, value);
+            generateQueue[key].forEach(function(cb) {
+              if (isError)
+                cb(value);
+              else
+                cb(undefined, value);
+            });
+            if (isError)
+              generateQueue[key] = {
+                push: function(cb) {
+                  cb(value);
+                }
+              } as any;
+            else
+              generateQueue[key] = {
+                push: function(cb) {
+                  cb(undefined, value);
+                }
+              } as any;
+          })
+        };
+        if (unusedKeys.length == keys.length)
+          generator(keys, function(err, ret) {
+            if (err)
+              callback(err);
+            else {
+              if(!ret)
+                ret = {};
+              finished(ret);
+              callback(undefined, ret);
+            }
+          });
+        else
+          generator(keys, function(err, ret) {
+            finished(ret);
+            unusedKeys.forEach(function(key) {
+              done(key, err || (ret && ret[key]));
+            });
+          });
+      }
+    } else
+      callback(undefined, {});
   }
   entries(): IterableIterator<[string, V]>{
       const it = super.entries();

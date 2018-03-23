@@ -1,23 +1,13 @@
-[![Package Version](https://img.shields.io/npm/v/lru-weak-cache.svg)](https://www.npmjs.org/package/lru-weak-cache) [![Build Status](https://travis-ci.org/NexusTools/node-lru-weak-cache.svg)](https://travis-ci.org/NexusTools/node-lru-weak-cache) [![Coverage Status](https://img.shields.io/coveralls/NexusTools/node-lru-weak-cache.svg)](https://coveralls.io/r/NexusTools/node-lru-weak-cache?branch=master) [![Apache License 2.0](http://img.shields.io/hexpm/l/plug.svg)](http://www.apache.org/licenses/LICENSE-2.0.html)
+/// <reference types="node" />
 
-node-lru-weak-cache
--------------------
-A caching Map<string, V extends object> that deletes the least-recently-used items with weak references and async generation.
-Inspired by [lru-cache](https://www.npmjs.com/package/lru-cache).
-
-```bash
-npm install lru-weak-cache
-```
-
-```typescript
-declare interface CacheGenerator<V extends Object> {
+export interface CacheGenerator<V extends Object> {
   (key: string, callback: (err: Error, value?: V) => void): void;
 }
-declare interface CacheMultiGenerator<V extends Object> {
-  (key: string, callback: (err: Error, ret?: {[key: string]: V}) => void): void;
+export interface CacheMultiGenerator<V extends Object> {
+  (keys: string[], callback: (err: Error, ret?: {[key: string]: V}) => void): void;
 }
 
-export = class LRUWeakCache<V extends object> extends Map<string, V> {
+declare class LRUWeakCache<V extends object> extends Map<string, V> {
   /**
    * Construct a new LRUWeakCache instance.
    *
@@ -47,8 +37,3 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
    */
   generateMulti(keys: string[], generator: CacheMultiGenerator<V>, callback: (err: Error, ret?: {[key: string]: V}) => void): void;
 }
-```
-
-legal
------
-node-lru-weak-cache is licensed under [Apache License 2.0](LICENSE.md)

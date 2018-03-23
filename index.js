@@ -7,14 +7,13 @@ module.exports = class LRUWeakCache extends Map {
         this.generateQueue = {};
         if (typeof options === "number")
             options = { capacity: options };
-        this.reliveOnAccess = options.reliveOnAccess;
-        this.retimeOnAccess = options.retimeOnAccess;
-        this.lifetime = options.lifetime;
+        this.resetTimersOnAccess = options.resetTimersOnAccess;
         this.capacity = options.capacity;
-        this.timeout = options.timeout;
-        if (this.lifetime > 0)
+        this.minAge = options.minAge;
+        this.maxAge = options.maxAge;
+        if (this.minAge > 0)
             this.weakeners = {};
-        if (this.timeout > 0)
+        if (this.maxAge > 0)
             this.timeouts = {};
         if (this.capacity > 0)
             this.accesses = {};
@@ -92,7 +91,7 @@ module.exports = class LRUWeakCache extends Map {
                 clearTimeout(timeouts[key]);
             }
             catch (e) { }
-            timeouts[key] = setTimeout(destructor, this.timeout);
+            timeouts[key] = setTimeout(destructor, this.maxAge);
         }
         try {
             this.accesses[key] = +new Date;
@@ -106,7 +105,7 @@ module.exports = class LRUWeakCache extends Map {
             catch (e) { }
             weakeners[key] = setTimeout(function () {
                 Map.prototype.set.call(self, key, weak(value, destructor));
-            }, this.lifetime);
+            }, this.minAge);
             return super.set(key, value);
         }
         catch (e) {
@@ -116,14 +115,13 @@ module.exports = class LRUWeakCache extends Map {
     get(key) {
         var val = super.get(key);
         if (val) {
-            if (this.retimeOnAccess)
+            if (this.resetTimersOnAccess) {
                 try {
                     const timeouts = this.timeouts;
                     clearTimeout(timeouts[key]);
-                    timeouts[key] = setTimeout(this.destructors[key], this.timeout);
+                    timeouts[key] = setTimeout(this.destructors[key], this.maxAge);
                 }
                 catch (e) { }
-            if (this.reliveOnAccess)
                 try {
                     const self = this;
                     const weakeners = this.weakeners;
@@ -134,9 +132,10 @@ module.exports = class LRUWeakCache extends Map {
                     clearTimeout(weakeners[key]);
                     weakeners[key] = setTimeout(function () {
                         Map.prototype.set.call(self, key, weak(val, self.destructors[key]));
-                    }, this.lifetime);
+                    }, this.minAge);
                 }
                 catch (e) { }
+            }
             try {
                 this.accesses[key] = +new Date;
             }
@@ -161,20 +160,21 @@ module.exports = class LRUWeakCache extends Map {
         const val = this.get(key);
         if (val === undefined) {
             const generateQueue = this.generateQueue;
-            var keyQueue = this.generateQueue[key];
+            var keyQueue = generateQueue[key];
             if (keyQueue)
                 keyQueue.push(callback);
             else {
                 const self = this;
-                keyQueue = this.generateQueue[key] = [callback];
+                keyQueue = generateQueue[key] = [callback];
                 generator(key, function (err, value) {
-                    delete self.generateQueue[key];
+                    delete generateQueue[key];
                     if (err)
                         keyQueue.forEach(function (callback) {
                             callback(err);
                         });
                     else {
-                        self.set(key, value);
+                        if (value)
+                            self.set(key, value);
                         keyQueue.forEach(function (callback) {
                             callback(undefined, value);
                         });
@@ -184,6 +184,103 @@ module.exports = class LRUWeakCache extends Map {
         }
         else
             callback(undefined, val);
+    }
+    generateMulti(keys, generator, callback) {
+        if (keys.length) {
+            var remaining = keys.length;
+            const ret = {};
+            const done = function (key, val) {
+                ret[key] = val;
+                if (!--remaining) {
+                    var err;
+                    Object.keys(ret).forEach(function (key) {
+                        const val = ret[key];
+                        if (val instanceof Error) {
+                            if (err) {
+                                if (err.message !== val.message) {
+                                    if (!err['multi']) {
+                                        console.warn(err);
+                                        err = new Error("Multiple errors occured, see log");
+                                        err['multi'] = true;
+                                    }
+                                    console.warn(val);
+                                }
+                            }
+                            else
+                                err = val;
+                        }
+                    });
+                    if (err)
+                        callback(err);
+                    else
+                        callback(undefined, ret);
+                }
+            };
+            const self = this;
+            const unusedKeys = [];
+            const generateQueue = this.generateQueue;
+            keys.forEach(function (key) {
+                const keyQueue = generateQueue[key];
+                if (keyQueue) {
+                    keyQueue.push(function (err, value) {
+                        done(key, err || value);
+                    });
+                }
+                else
+                    unusedKeys.push(key);
+            });
+            if (unusedKeys.length) {
+                unusedKeys.forEach(function (key) {
+                    generateQueue[key] = [];
+                });
+                const finished = function (ret) {
+                    unusedKeys.forEach(function (key) {
+                        const value = ret[key];
+                        const isError = value instanceof Error;
+                        if (!isError && value)
+                            self.set(key, value);
+                        generateQueue[key].forEach(function (cb) {
+                            if (isError)
+                                cb(value);
+                            else
+                                cb(undefined, value);
+                        });
+                        if (isError)
+                            generateQueue[key] = {
+                                push: function (cb) {
+                                    cb(value);
+                                }
+                            };
+                        else
+                            generateQueue[key] = {
+                                push: function (cb) {
+                                    cb(undefined, value);
+                                }
+                            };
+                    });
+                };
+                if (unusedKeys.length == keys.length)
+                    generator(keys, function (err, ret) {
+                        if (err)
+                            callback(err);
+                        else {
+                            if (!ret)
+                                ret = {};
+                            finished(ret);
+                            callback(undefined, ret);
+                        }
+                    });
+                else
+                    generator(keys, function (err, ret) {
+                        finished(ret);
+                        unusedKeys.forEach(function (key) {
+                            done(key, err || (ret && ret[key]));
+                        });
+                    });
+            }
+        }
+        else
+            callback(undefined, {});
     }
     entries() {
         const it = super.entries();

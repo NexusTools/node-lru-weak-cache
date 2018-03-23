@@ -2,11 +2,15 @@
 
 require("source-map-support").install();
 import assert = require("assert");
+import async = require("async");
+import path = require("path");
+import fs = require("fs");
 
 import LRU = require("../index");
 
 const gccache = new LRU;
 const onemb = new Int8Array(1000000);
+const datadir = path.resolve(__dirname, "data");
 it("large items", function() {
   gccache.set("1mb", onemb); // 1mb
   gccache.set("5mb", new Int8Array(5000000)); // 5mb
@@ -25,7 +29,7 @@ it("capacity", function () {
 });
 it("timeout", function (cb) {
   const refs = [];
-  const cache = new LRU({timeout:500});
+  const cache = new LRU({maxAge:500});
   for(var i=0; i<10; i++) {
     const obj = new Object;
     cache.set("item" + i, obj);
@@ -37,37 +41,84 @@ it("timeout", function (cb) {
     cb();
   }, 550);
 });
-it("generate", function (cb) {
-  var first: any;
-  const cache = new LRU();
-  const generator = function(key, cb) {
-    setTimeout(function() {
-      const val = {a: Math.random(), b: Math.random(), c: Math.random()};
-      if(!first)
-        first = val;
-      cb(undefined, val);
-    }, Math.random() * 1500);
-  }
+const generate_tests = [
+  ["a", "a", "b", "b", "c", "c", "d", "d", "a", "b", "c", "d"],
+  [["a", "b", "c", "d"], "a", "b", "c", "d"],
+  ["a", "d", ["a", "b", "c", "d"], "b", "c"],
+  ["e", "f", "a", "e", "f"],
+  ["g", "h", ["i", "j", "g"], ["k", "l", "m", "e", "f"]],
+  [["k", "l", "m", "e", "f"]]
+];
+var generate_i = 1;
+generate_tests.forEach(function(test) {
+  const i = generate_i;
+  generate_i ++;
+  it("generate " + i, function (cb) {
+    const realdata = {
+      a: Buffer.from("Sudo\r\n"),
+      b: Buffer.from("Su\r\n"),
+      c: Buffer.from("Cow\r\n"),
+      d: Buffer.from("Bash\r\n")
+    };
+    const cache = new LRU<Buffer>();
 
-  var remaining = 200;
-  for(var i=0; i<200; i++) {
-    cache.generate("test", generator, function(err, res) {
-      assert.equal(res, first);
-      if(!--remaining) {
-        cache.generate("test", undefined, function(err, value) {
-          assert.equal(value, first);
-          cache.clear();
-          assert.equal(cache.size, 0);
-          cache.generate("test", function(key, cb) {
-            cb(new Error("Test"));
-          }, function(err) {
-            assert.equal(err.message, "Test");
+    const fslookup = function(key: string, callback: (err?: Error, ret?: Buffer) => void) {
+      fs.readFile(path.resolve(datadir, key), function(err, data) {
+        callback(key > "f" ? err : undefined, data);
+      });
+    }
+    const fsmulti = function(keys: string[], callback: (err: Error, ret?: {[key: string]: Buffer}) => void) {
+      const ret = {};
+      async.each(keys, function(key, cb) {
+          fslookup(key, function(err, _ret) {
+            if(key > "f")
+              return cb(err);
+            else
+              ret[key] = _ret;
             cb();
           });
+      }, function(err) {
+        callback(err, ret);
+      });
+    }
+    cache.clear();
+    async.each(test, function(part, cb) {
+      if(Array.isArray(part)) {
+        cache.generateMulti(part, fsmulti as any, function(err, data) {
+          if(i >= 5) {
+            if(!err)
+              throw new Error("Expected error past iteration 5..." + JSON.stringify(part));
+            cb();
+            return;
+          }
+
+          if(err)
+            cb(err);
+          else {
+            part.forEach(function(p) {
+              assert.deepEqual(data[p], realdata[p]);
+            });
+            cb();
+          }
         });
-      }
-    });
-  }
+      } else
+        cache.generate(part, fslookup, function(err, data) {
+          if(i >= 5) {
+            if(!err)
+              throw new Error("Expected error past iteration 5... " + part);
+            cb();
+            return;
+          }
+
+          if(err)
+            cb(err);
+          else {
+            assert.deepEqual(data, realdata[part]);
+            cb();
+          }
+        });
+    }, cb);
+  });
 });
 it("iterators", function() {
   const val = new Object;
@@ -86,7 +137,7 @@ it("iterators", function() {
 });
 it("lifetime", function(cb) {
   const refs = [];
-  const cache = new LRU({timeout:500,lifetime:400,reliveOnAccess:true,retimeOnAccess:true});
+  const cache = new LRU({maxAge:500,minAge:400,resetTimersOnAccess:true});
   for(var i=0; i<10; i++) {
     const obj = new Int8Array(100000);
     cache.set("item" + i, obj);
