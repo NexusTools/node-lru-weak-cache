@@ -14,7 +14,7 @@ declare interface CacheGenerator<V extends Object> {
   (key: string, callback: (err: Error, value?: V) => void): void;
 }
 declare interface CacheMultiGenerator<V extends Object> {
-  (key: string, callback: (err: Error, ret?: {[key: string]: V}) => void): void;
+  (keys: string[], callback: (err: Error, ret?: {[key: string]: V}) => void): void;
 }
 
 export = class LRUWeakCache<V extends object> extends Map<string, V> {
