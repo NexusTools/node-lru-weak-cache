@@ -187,8 +187,8 @@ module.exports = class LRUWeakCache extends Map {
     }
     generateMulti(keys, generator, callback) {
         if (keys.length) {
-            var remaining = keys.length;
             const ret = {};
+            var remaining = keys.length;
             const done = function (key, val) {
                 ret[key] = val;
                 if (!--remaining) {
@@ -220,14 +220,19 @@ module.exports = class LRUWeakCache extends Map {
             const unusedKeys = [];
             const generateQueue = this.generateQueue;
             keys.forEach(function (key) {
-                const keyQueue = generateQueue[key];
-                if (keyQueue) {
-                    keyQueue.push(function (err, value) {
-                        done(key, err || value);
-                    });
+                const val = self.get(key);
+                if (val)
+                    done(key, val);
+                else {
+                    const keyQueue = generateQueue[key];
+                    if (keyQueue) {
+                        keyQueue.push(function (err, value) {
+                            done(key, err || value);
+                        });
+                    }
+                    else
+                        unusedKeys.push(key);
                 }
-                else
-                    unusedKeys.push(key);
             });
             if (unusedKeys.length) {
                 unusedKeys.forEach(function (key) {
@@ -261,8 +266,14 @@ module.exports = class LRUWeakCache extends Map {
                 };
                 if (unusedKeys.length == keys.length)
                     generator(keys, function (err, ret) {
-                        if (err)
+                        if (err) {
+                            ret = {};
+                            unusedKeys.forEach(function (key) {
+                                ret[key] = err;
+                            });
+                            finished(ret);
                             callback(err);
+                        }
                         else {
                             if (!ret)
                                 ret = {};

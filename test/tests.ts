@@ -50,38 +50,37 @@ const generate_tests = [
   [["k", "l", "m", "e", "f"]]
 ];
 var generate_i = 1;
+const realdata = {
+  a: Buffer.from("Sudo\r\n"),
+  b: Buffer.from("Su\r\n"),
+  c: Buffer.from("Cow\r\n"),
+  d: Buffer.from("Bash\r\n")
+};
+const cache = new LRU<Buffer>();
+const fslookup = function(key: string, callback: (err?: Error, ret?: Buffer) => void) {
+  fs.readFile(path.resolve(datadir, key), function(err, data) {
+    callback(key > "f" ? err : undefined, data);
+  });
+}
+const fsmulti = function(keys: string[], callback: (err: Error, ret?: {[key: string]: Buffer}) => void) {
+  const ret = {};
+  async.each(keys, function(key, cb) {
+      fslookup(key, function(err, _ret) {
+        if(key > "f")
+          return cb(err);
+        else
+          ret[key] = _ret;
+        cb();
+      });
+  }, function(err) {
+    callback(err, ret);
+  });
+}
 generate_tests.forEach(function(test) {
   const i = generate_i;
   generate_i ++;
-  it("generate " + i, function (cb) {
-    const realdata = {
-      a: Buffer.from("Sudo\r\n"),
-      b: Buffer.from("Su\r\n"),
-      c: Buffer.from("Cow\r\n"),
-      d: Buffer.from("Bash\r\n")
-    };
-    const cache = new LRU<Buffer>();
-
-    const fslookup = function(key: string, callback: (err?: Error, ret?: Buffer) => void) {
-      fs.readFile(path.resolve(datadir, key), function(err, data) {
-        callback(key > "f" ? err : undefined, data);
-      });
-    }
-    const fsmulti = function(keys: string[], callback: (err: Error, ret?: {[key: string]: Buffer}) => void) {
-      const ret = {};
-      async.each(keys, function(key, cb) {
-          fslookup(key, function(err, _ret) {
-            if(key > "f")
-              return cb(err);
-            else
-              ret[key] = _ret;
-            cb();
-          });
-      }, function(err) {
-        callback(err, ret);
-      });
-    }
-    cache.clear();
+  const captured = {};
+  const dotest = function (cb) {
     async.each(test, function(part, cb) {
       if(Array.isArray(part)) {
         cache.generateMulti(part, fsmulti as any, function(err, data) {
@@ -96,7 +95,13 @@ generate_tests.forEach(function(test) {
             cb(err);
           else {
             part.forEach(function(p) {
-              assert.deepEqual(data[p], realdata[p]);
+              const dat = data[p];
+              const cap = captured[p];
+              if (cap)
+                assert.strictEqual(dat, cap);
+              else
+                captured[p] = dat;
+              assert.deepEqual(dat, realdata[p]);
             });
             cb();
           }
@@ -118,7 +123,20 @@ generate_tests.forEach(function(test) {
           }
         });
     }, cb);
+  };
+  it("generate " + i, function(cb) {
+      cache.clear();
+      dotest(cb);
   });
+  it("generate " + i + " redo", dotest);
+  it("generate " + i + " preset", function(cb) {
+    cache.clear();
+    Object.keys(captured).forEach(function(key) {
+      cache.set(key, captured[key]);
+    });
+    dotest(cb);
+  });
+  it("generate " + i + " redo again", dotest);
 });
 it("iterators", function() {
   const val = new Object;

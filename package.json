@@ -1,6 +1,6 @@
 {
   "name": "lru-weak-cache",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "A caching Map<string, V extends object> that deletes the least-recently-used items with weak references and async generation. Inspired by [lru-cache](https://www.npmjs.com/package/lru-cache).",
   "main": "index.js",
   "scripts": {
