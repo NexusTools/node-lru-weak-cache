@@ -1,14 +1,43 @@
 /// <reference types="node" />
 
-import { LRUWeakCache as ILRUWeakCache, CacheGenerator, CacheMultiGenerator } from "./types";
+import { LRUWeakCache as ILRUWeakCache, CacheGenerator, CacheMultiGenerator, VCancel, Cancel } from "./types";
 import weak = require("weak");
 
+interface GeneratorCallback<V extends object> {
+  (err: Error, value?: V): void;
+}
+interface GeneratorQueue<V extends object> extends Array<GeneratorCallback<V>> {
+  cancel: Cancel<V>;
+}
+
+const findError = function(data: {[index:string]:any}) {
+  var err: Error;
+  Object.keys(data).forEach(function(key) {
+    const val = data[key];
+    if(val instanceof Error) {
+      if(err) {
+        if(err.message !== val.message) {
+          if (!err['multi']) {
+            console.warn(err);
+            err = new Error("Multiple errors occured, see log");
+            err['multi'] = true;
+          }
+          console.warn(val);
+        }
+      } else
+        err = val;
+    }
+  });
+  return err;
+}
+
+const noop = function() {}
 export = class LRUWeakCache<V extends object> extends Map<string, V> implements ILRUWeakCache<V> {
   private accesses: {[index: string]: number};
   private timeouts: {[index: string]: number};
   private weakeners: {[index: string]: number};
   private destructors: {[index: string]: () => void} = {};
-  private generateQueue: {[index: string]: ((err: Error, value?: V) => void)[]} = {};
+  private generateQueue: {[index: string]: GeneratorQueue<V>} = {};
   private resetTimersOnAccess: boolean;
   private capacity: number;
   private minAge: number;
@@ -31,6 +60,10 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> implements 
   }
 	clear(): void {
     this.destructors = {};
+    const generateQueue = this.generateQueue;
+    Object.keys(generateQueue).forEach(function(key) {
+      generateQueue[key].cancel();
+    });
     try {
       const timeouts = this.timeouts;
       Object.keys(timeouts).forEach(function(key) {
@@ -52,6 +85,9 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> implements 
 	}
 	delete(key: string): boolean{
     delete this.destructors[key];
+    const queue = this.generateQueue[key];
+    if (queue)
+      queue.cancel();
     try{
       const timeouts = this.timeouts;
       clearTimeout(timeouts[key]);
@@ -70,18 +106,30 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> implements 
     };
     return destructor;
   }
+  trim(by: number) {
+    const accesses = this.accesses;
+    const keys = Array.from(this.keys());
+    keys.sort(function(a, b) {
+      return accesses[a] - accesses[b];
+    });
+    for(var i=0; i<by; i++)
+      this.delete(keys[i]);
+  }
 	set(key: string, value: V): this{
+    var cvalue = super.get(key);
+    try {cvalue=weak.get(cvalue);} catch(e) {}
+    if (cvalue === value)
+      return;
+
+    const generateQueue = this.generateQueue;
+    const queue = generateQueue[key];
+    if (queue)
+      queue.cancel(value);
+
     const capacity = this.capacity;
     const over = (this.size - this.capacity) + 1;
-    if(over > 0) {
-      const accesses = this.accesses;
-      const keys = Array.from(this.keys());
-      keys.sort(function(a, b) {
-        return accesses[a] - accesses[b];
-      });
-      for(var i=0; i<over; i++)
-        this.delete(keys[i]);
-    }
+    if(over > 0)
+      this.trim(over);
 
     const self = this;
     const destructor = this.makeDestruct(key);
@@ -141,7 +189,7 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> implements 
       callbackfn.call(this, value, key, map);
     }, thisArg);
   }
-  generate(key: string, generator: CacheGenerator<V>, callback: (err: Error, value?: V) => void) {
+  generate(key: string, generator: CacheGenerator<V>, callback: (err: Error, value?: V) => void): Cancel<V>{
     const val = this.get(key);
     if(val === undefined) {
       const generateQueue = this.generateQueue;
@@ -150,57 +198,96 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> implements 
         keyQueue.push(callback);
       else {
         const self = this;
-        keyQueue = generateQueue[key] = [callback];
-        generator(key, function(err, value) {
-          delete generateQueue[key];
+        var finished: boolean;
+        const finish = function(err: Error, value?: V) {
+          if(finished)
+            return;
+          finished = true;
+          if (generateQueue[key] === keyQueue)
+            delete generateQueue[key];
           if (err)
             keyQueue.forEach(function(callback) {
               callback(err);
             });
           else {
-            if (value)
+            if (value && !generateQueue[key])
               self.set(key, value);
             keyQueue.forEach(function(callback) {
               callback(undefined, value);
             });
           }
-        });
+        }
+        var retCancel: VCancel;
+        keyQueue = generateQueue[key] = [callback] as any;
+        keyQueue.cancel = function(data) {
+          if (data instanceof Error)
+            finish(data);
+          else
+            finish(undefined, data);
+          if (retCancel)
+            retCancel();
+        }
+        retCancel = generator(key, finish) as VCancel;
       }
-    } else
-      callback(undefined, val);
+      return keyQueue.cancel;
+    }
+    callback(undefined, val);
+    return noop;
   }
-  generateMulti(keys: string[], generator: CacheMultiGenerator<V>, callback: (err: Error, ret?: { [key: string]: V }) => void): void {
+  generateMulti(keys: string[], generator: CacheMultiGenerator<V>, callback: (err: Error, ret?: { [key: string]: V }) => void): Cancel<{[index:string]:V}>{
     if (keys.length) {
-      const ret = {};
+      const self = this;
+      const unusedKeys = [];
+      var finished: boolean;
       var remaining = keys.length;
-      const done = function(key: string, val: V | Error) {
-        ret[key] = val;
-        if (!--remaining) {
-          var err: Error;
-          Object.keys(ret).forEach(function(key) {
-            const val = ret[key];
-            if(val instanceof Error) {
-              if(err) {
-                if(err.message !== val.message) {
-                  if (!err['multi']) {
-                    console.warn(err);
-                    err = new Error("Multiple errors occured, see log");
-                    err['multi'] = true;
-                  }
-                  console.warn(val);
-                }
-              } else
-                err = val;
-            }
+      const cancelledKeys: string[] = [];
+      const ret: { [key: string]: V | Error } = {};
+      const retKeys: {[index: string]: boolean} = {};
+      const keyCancels: {[index:string]:Cancel<V>} = {};
+      const queues: {[index: string]: GeneratorQueue<V>} = {};
+      const writeUnusedKeys = function(ret, err?) {
+        if (err)
+          keys.forEach(function(key) {
+            const queue = queues[key];
+            if (queue === generateQueue[key])
+              delete generateQueue[key];
+            if (queue)
+              queue.forEach(function(cb) {
+                cb(err);
+              });
           });
+        else
+          keys.forEach(function(key) {
+            const queue = queues[key];
+            if (queue === generateQueue[key])
+              delete generateQueue[key];
+            const value = ret[key];
+            if(value && !generateQueue[key])
+              self.set(key, value as V);
+            if (queue)
+              queue.forEach(function(cb) {
+                cb(undefined, value as V);
+              });
+          });
+      }
+      var done = function(key: string, val: V | Error) {
+        if (finished)
+          return;
+        if (val)
+          ret[key] = val;
+        if(retKeys[key])
+          return;
+        retKeys[key] = true;
+        if (!--remaining) {
+          finished = true;
+          var err = findError(ret);
+          writeUnusedKeys(ret, err);
           if(err)
             callback(err);
           else
-            callback(undefined, ret);
+            callback(undefined, ret as any);
         }
       };
-      const self = this;
-      const unusedKeys = [];
       const generateQueue = this.generateQueue;
       keys.forEach(function(key) {
         const val = self.get(key);
@@ -209,70 +296,125 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> implements 
         else {
           const keyQueue = generateQueue[key];
           if (keyQueue) {
-            keyQueue.push(function(err, value) {
-              done(key, err || value);
-            });
+            var cancelled: boolean;
+            var origCancel = keyQueue.cancel;
+            (queues[key] = (generateQueue[key] = keyQueue.splice(0, keyQueue.length, function(err, value) {
+              if (!cancelled)
+                done(key, err || value);
+            }) as any)).cancel = keyCancels[key] = function(data) {
+              cancelled = true;
+              if (origCancel) {
+                origCancel(data);
+                origCancel = undefined;
+              }
+              done(key, data);
+            }
           } else
             unusedKeys.push(key);
         }
       });
 
       if (unusedKeys.length) {
+        var genCancel: VCancel;
+        var cancel: Cancel<{[index:string]:V}>;
         unusedKeys.forEach(function(key) {
-          generateQueue[key] = [];
+          const queue: GeneratorQueue<V> = [] as any;
+          queue.cancel = function(data) {
+            if (cancelledKeys.indexOf(key) === -1)
+              cancelledKeys.push(key);
+            done(key, data);
+          };
+          generateQueue[key] = queues[key] = queue;
         });
-        const finished = function(ret) {
-          unusedKeys.forEach(function(key) {
-            const value = ret[key];
-            const isError = value instanceof Error;
-            if (!isError && value)
-              self.set(key, value);
-            generateQueue[key].forEach(function(cb) {
-              if (isError)
-                cb(value);
-              else
-                cb(undefined, value);
-            });
-            if (isError)
-              generateQueue[key] = {
-                push: function(cb) {
-                  cb(value);
-                }
-              } as any;
-            else
-              generateQueue[key] = {
-                push: function(cb) {
-                  cb(undefined, value);
-                }
-              } as any;
-          })
-        };
-        if (unusedKeys.length == keys.length)
-          generator(keys, function(err, ret) {
-            if (err) {
+        if (unusedKeys.length == keys.length) {
+          const overrides = {};
+          var finish = function(err, ret?) {
+            if (finished)
+              return;
+            if(!ret)
               ret = {};
-              unusedKeys.forEach(function(key) {
-                ret[key] = err as any;
-              });
-              finished(ret);
-              callback(err);
-            } else {
-              if(!ret)
-                ret = {};
-              finished(ret);
-              callback(undefined, ret);
-            }
-          });
-        else
-          generator(keys, function(err, ret) {
-            finished(ret);
-            unusedKeys.forEach(function(key) {
-              done(key, err || (ret && ret[key]));
+            Object.keys(overrides).forEach(function(key) {
+              const val = overrides[key];
+              if(val instanceof Error)
+                err = val;
+              else if(val)
+                ret[key] = val;
             });
+            writeUnusedKeys(ret, err);
+            if (err)
+              callback(err);
+            else
+              callback(undefined, ret);
+            finished = true;
+          };
+          done = function(key, data) {
+            if (data)
+              overrides[key] = data;
+            if (Object.keys(overrides).length == keys.length) {
+              if(finished)
+                return;
+              finished = true;
+              var err = findError(overrides);
+              writeUnusedKeys(overrides, err);
+              if (err)
+                callback(err);
+              else
+                callback(undefined, overrides);
+              if (genCancel)
+                genCancel();
+            }
+          }
+          genCancel = generator(keys, finish) as VCancel;
+          return function(data) {
+            if (finished)
+              return;
+            var err = data instanceof Error ? data : findError(data);
+            if (err)
+              finish(err);
+            else
+              finish(undefined, data);
+          };
+        } else {
+          genCancel = generator(keys, function(err, ret) {
+            unusedKeys.forEach(function(key) {
+              if (cancelledKeys.indexOf(key) === -1)
+                done(key, err || (ret && ret[key]));
+            });
+          }) as VCancel;
+          cancel = function(data) {
+            const isError = data instanceof Error;
+            unusedKeys.forEach(function(key) {
+              if (cancelledKeys.indexOf(key) > -1)
+                return;
+              done(key, isError ? data : data[key]);
+            });
+            if (genCancel)
+              genCancel();
+          }
+        }
+        return function(data) {
+          if(finished)
+            return;
+          const isError = data instanceof Error;
+          Object.keys(keyCancels).forEach(function(key) {
+            keyCancels[key](isError ? data : data[key]);
           });
+          cancel(data);
+          finished = true;
+        }
       }
-    } else
-      callback(undefined, {});
+      return function(data) {
+        if(finished)
+          return;
+        const isError = data instanceof Error;
+        Object.keys(keyCancels).forEach(function(key) {
+          keyCancels[key](isError ? data : data[key]);
+        });
+        finished = true;
+      }
+    }
+    callback(undefined, {});
+    return noop;
   }
   entries(): IterableIterator<[string, V]>{
       const it = super.entries();

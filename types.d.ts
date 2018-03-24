@@ -1,10 +1,16 @@
 /// <reference types="node" />
 
+export interface VCancel {
+  (): void
+}
+export interface Cancel<V> {
+  (dataOrError?: V | Error): void
+}
 export interface CacheGenerator<V extends object> {
-  (key: string, callback: (err: Error, value?: V) => void): void;
+  (key: string, callback: (err: Error, value?: V) => void): VCancel | void;
 }
 export interface CacheMultiGenerator<V extends object> {
-  (keys: string[], callback: (err: Error, ret?: {[key: string]: V}) => void): void;
+  (keys: string[], callback: (err: Error, ret?: {[key: string]: V}) => void): VCancel | void;
 }
 
 declare class LRUWeakCache<V extends object> extends Map<string, V> {
@@ -26,7 +32,7 @@ declare class LRUWeakCache<V extends object> extends Map<string, V> {
    * @param generator The generator to generate the value using
    * @param callback The callback to call when finished
    */
-  generate(key: string, generator: CacheGenerator<V>, callback: (err: Error, value?: V) => void): void;
+  generate(key: string, generator: CacheGenerator<V>, callback: (err: Error, value?: V) => void): Cancel<V>;
   /**
    * Asynchroniously generate multiple values for a given key with a callback.
    * This method can be called multiple times, or in conjunction with {@see generate} and only calls the generator once per key for the specified caching settings.
@@ -35,5 +41,11 @@ declare class LRUWeakCache<V extends object> extends Map<string, V> {
    * @param generator The generator to generate the values using
    * @param callback The callback to call when finished
    */
-  generateMulti(keys: string[], generator: CacheMultiGenerator<V>, callback: (err: Error, ret?: {[key: string]: V}) => void): void;
+  generateMulti(keys: string[], generator: CacheMultiGenerator<V>, callback: (err: Error, ret?: {[key: string]: V}) => void): Cancel<{[index:string]:V}>;
+  /**
+   * Trim least-recently-used items from this map.
+   *
+   * @param by The amount to trim by
+   */
+   trim(by: number): void;
 }

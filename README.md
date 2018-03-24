@@ -10,13 +10,6 @@ npm install lru-weak-cache
 ```
 
 ```typescript
-declare interface CacheGenerator<V extends object> {
-  (key: string, callback: (err: Error, value?: V) => void): void;
-}
-declare interface CacheMultiGenerator<V extends object> {
-  (keys: string[], callback: (err: Error, ret?: {[key: string]: V}) => void): void;
-}
-
 export = class LRUWeakCache<V extends object> extends Map<string, V> {
   /**
    * Construct a new LRUWeakCache instance.
@@ -36,7 +29,7 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
    * @param generator The generator to generate the value using
    * @param callback The callback to call when finished
    */
-  generate(key: string, generator: CacheGenerator<V>, callback: (err: Error, value?: V) => void): void;
+  generate(key: string, generator: CacheGenerator<V>, callback: (err: Error, value?: V) => void): Cancel<V>;
   /**
    * Asynchroniously generate multiple values for a given key with a callback.
    * This method can be called multiple times, or in conjunction with {@see generate} and only calls the generator once per key for the specified caching settings.
@@ -45,8 +38,40 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
    * @param generator The generator to generate the values using
    * @param callback The callback to call when finished
    */
-  generateMulti(keys: string[], generator: CacheMultiGenerator<V>, callback: (err: Error, ret?: {[key: string]: V}) => void): void;
+  generateMulti(keys: string[], generator: CacheMultiGenerator<V>, callback: (err: Error, ret?: {[key: string]: V}) => void): Cancel<{[index:string]:V}>;
+  /**
+   * Trim least-recently-used items from this map.
+   *
+   * @param by The amount to trim by
+   */
+   trim(by: number): void;
 }
+
+interface VCancel {
+  (): void
+}
+interface Cancel<V> {
+  (dataOrError?: V | Error): void
+}
+interface CacheGenerator<V extends object> {
+  (key: string, callback: (err: Error, value?: V) => void): VCancel | undefined;
+}
+interface CacheMultiGenerator<V extends object> {
+  (keys: string[], callback: (err: Error, ret?: {[key: string]: V}) => void): VCancel | undefined;
+}
+```
+
+usage
+-----
+```typescript
+import LRUWeakCache = require("lru-weak-cache");
+
+var cache = new LRUWeakCache<any>(); // Defaults to a capacity of 200
+cache = new LRUWeakCache<any>({maxAge:3600000}); // Nothing older than 1 hour
+cache = new LRUWeakCache<any>({minAge:600000}); // 10 minutes before garbage collection
+cache = new LRUWeakCache<any>(800); // Capacity of 800
+
+// Everything from Map<string, ?> is implemented
 ```
 
 legal

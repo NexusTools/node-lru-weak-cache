@@ -1,12 +1,12 @@
 {
   "name": "lru-weak-cache",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A caching Map<string, V extends object> that deletes the least-recently-used items with weak references and async generation. Inspired by [lru-cache](https://www.npmjs.com/package/lru-cache).",
   "main": "index.js",
   "scripts": {
-    "test": "node node_modules/mocha/bin/mocha --bail --reporter spec --check-leaks test/",
-    "test-coverage": "node node_modules/istanbul/lib/cli cover node_modules/mocha/bin/_mocha -- --bail --reporter spec --check-leaks test/",
-    "test-travis": "istanbul cover node_modules/mocha/bin/_mocha --report lcovonly -- --reporter spec --check-leaks test/"
+    "test": "node node_modules/mocha/bin/mocha --bail --reporter spec --check-leaks --require=source-map-support/register test/",
+    "test-coverage": "node node_modules/istanbul/lib/cli cover node_modules/mocha/bin/_mocha -- --bail --reporter spec --check-leaks --require=source-map-support/register test/",
+    "test-travis": "istanbul cover node_modules/mocha/bin/_mocha --report lcovonly -- --reporter spec --check-leaks --require=source-map-support/register test/"
   },
   "author": "NexusTools <contact@nexustools.com>",
   "contributors": [
