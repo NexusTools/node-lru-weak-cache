@@ -107,6 +107,64 @@ module.exports = class LRUWeakCache extends Map {
         });
         for (var i = 0; i < by; i++)
             this.delete(keys[i]);
+        return this;
+    }
+    setMulti(data) {
+        const self = this;
+        const toset = {};
+        Object.keys(data).forEach(function (key) {
+            const val = data[key];
+            if (val && val !== Map.prototype.get.call(self, key))
+                toset[key] = val;
+            else
+                self.delete(key);
+        });
+        const keys = Object.keys(toset);
+        const length = keys.length;
+        if (length) {
+            const capacity = this.capacity;
+            const over = (this.size - this.capacity) + length;
+            if (over > 0)
+                this.trim(over);
+            const accesses = this.accesses;
+            const timeouts = this.timeouts;
+            const weakeners = this.weakeners;
+            const generateQueue = this.generateQueue;
+            const set = Map.prototype.set;
+            keys.forEach(function (key) {
+                const value = toset[key];
+                const queue = generateQueue[key];
+                if (queue)
+                    queue.cancel(value);
+                const destructor = self.makeDestruct(key);
+                self.destructors[key] = destructor;
+                if (timeouts) {
+                    try {
+                        clearTimeout(timeouts[key]);
+                    }
+                    catch (e) { }
+                    timeouts[key] = setTimeout(destructor, self.maxAge);
+                }
+                try {
+                    accesses[key] = +new Date;
+                }
+                catch (e) { }
+                try {
+                    try {
+                        clearTimeout(weakeners[key]);
+                    }
+                    catch (e) { }
+                    weakeners[key] = setTimeout(function () {
+                        set.call(self, key, weak(value, destructor));
+                    }, self.minAge);
+                    set.call(self, key, value);
+                }
+                catch (e) {
+                    set.call(self, key, weak(value, destructor));
+                }
+            });
+        }
+        return this;
     }
     set(key, value) {
         var cvalue = super.get(key);
@@ -116,14 +174,14 @@ module.exports = class LRUWeakCache extends Map {
         catch (e) { }
         if (cvalue === value)
             return;
-        const generateQueue = this.generateQueue;
-        const queue = generateQueue[key];
-        if (queue)
-            queue.cancel(value);
         const capacity = this.capacity;
         const over = (this.size - this.capacity) + 1;
         if (over > 0)
             this.trim(over);
+        const generateQueue = this.generateQueue;
+        const queue = generateQueue[key];
+        if (queue)
+            queue.cancel(value);
         const self = this;
         const destructor = this.makeDestruct(key);
         this.destructors[key] = destructor;
@@ -265,19 +323,22 @@ module.exports = class LRUWeakCache extends Map {
                                 cb(err);
                             });
                     });
-                else
+                else {
+                    const toset = {};
                     keys.forEach(function (key) {
                         const queue = queues[key];
                         if (queue === generateQueue[key])
                             delete generateQueue[key];
                         const value = ret[key];
                         if (value && !generateQueue[key])
-                            self.set(key, value);
+                            toset[key] = value;
                         if (queue)
                             queue.forEach(function (cb) {
                                 cb(undefined, value);
                             });
                     });
+                    self.setMulti(toset);
+                }
             };
             var done = function (key, val) {
                 if (finished)

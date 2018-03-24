@@ -31,6 +31,10 @@ const findError = function(data: {[index:string]:any}) {
   return err;
 }
 
+interface SetStep {
+  (): void;
+}
+
 const noop = function() {}
 export = class LRUWeakCache<V extends object> extends Map<string, V> implements ILRUWeakCache<V> {
   private accesses: {[index: string]: number};
@@ -114,6 +118,57 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> implements 
     });
     for(var i=0; i<by; i++)
       this.delete(keys[i]);
+    return this;
+  }
+  setMulti(data: {[index: string]: V}): this{
+    const self = this;
+    const toset: {[index: string]: V} = {};
+    Object.keys(data).forEach(function(key) {
+      const val = data[key];
+      if(val && val !== Map.prototype.get.call(self, key))
+        toset[key] = val;
+      else
+        self.delete(key);
+    });
+    const keys = Object.keys(toset);
+    const length = keys.length;
+    if(length) {
+      const capacity = this.capacity;
+      const over = (this.size - this.capacity) + length;
+      if(over > 0)
+        this.trim(over);
+
+      const accesses = this.accesses;
+      const timeouts = this.timeouts;
+      const weakeners = this.weakeners;
+      const generateQueue = this.generateQueue;
+      const set = Map.prototype.set;
+      keys.forEach(function(key) {
+        const value = toset[key];
+        const queue = generateQueue[key];
+        if (queue)
+          queue.cancel(value);
+        const destructor = self.makeDestruct(key);
+        self.destructors[key] = destructor;
+        if(timeouts) {
+          try {clearTimeout(timeouts[key]);} catch(e) {}
+          timeouts[key] = setTimeout(destructor, self.maxAge) as any;
+        }
+        try {
+          accesses[key] = +new Date;
+        } catch(e) {}
+        try {
+          try {clearTimeout(weakeners[key]);} catch(e) {}
+          weakeners[key] = setTimeout(function() {
+            set.call(self, key, weak(value, destructor) as any);
+          }, self.minAge) as any;
+          set.call(self, key, value);
+        } catch(e) {
+          set.call(self, key, weak(value, destructor) as any);
+        }
+      });
+    }
+    return this;
   }
 	set(key: string, value: V): this{
     var cvalue = super.get(key);
@@ -121,15 +176,15 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> implements 
     if (cvalue === value)
       return;
 
-    const generateQueue = this.generateQueue;
-    const queue = generateQueue[key];
-    if (queue)
-      queue.cancel(value);
-
     const capacity = this.capacity;
     const over = (this.size - this.capacity) + 1;
     if(over > 0)
       this.trim(over);
+
+    const generateQueue = this.generateQueue;
+    const queue = generateQueue[key];
+    if (queue)
+      queue.cancel(value);
 
     const self = this;
     const destructor = this.makeDestruct(key);
@@ -256,19 +311,22 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> implements 
                 cb(err);
               });
           });
-        else
+        else {
+          const toset = {};
           keys.forEach(function(key) {
             const queue = queues[key];
             if (queue === generateQueue[key])
               delete generateQueue[key];
             const value = ret[key];
             if(value && !generateQueue[key])
-              self.set(key, value as V);
+              toset[key] = value as V;
             if (queue)
               queue.forEach(function(cb) {
                 cb(undefined, value as V);
               });
           });
+          self.setMulti(toset);
+        }
       }
       var done = function(key: string, val: V | Error) {
         if (finished)

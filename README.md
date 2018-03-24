@@ -40,11 +40,15 @@ export = class LRUWeakCache<V extends object> extends Map<string, V> {
    */
   generateMulti(keys: string[], generator: CacheMultiGenerator<V>, callback: (err: Error, ret?: {[key: string]: V}) => void): Cancel<{[index:string]:V}>;
   /**
+   * Efficiently set multiple values while maintaining the capacity and other settings
+   */
+  setMulti(data: {[index: string]: V}): this;
+  /**
    * Trim least-recently-used items from this map.
    *
    * @param by The amount to trim by
    */
-   trim(by: number): void;
+   trim(by: number): this;
 }
 
 interface VCancel {
