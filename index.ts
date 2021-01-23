@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { LRUWeakCache as ILRUWeakCache, CacheGenerator, CacheMultiGenerator, VCancel, Cancel } from "./types";
-import weak = require("weak");
+import weak = require("weak-napi");
 
 interface GeneratorCallback<V extends object> {
   (err: Error, value?: V): void;

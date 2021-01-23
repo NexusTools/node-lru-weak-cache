@@ -1,11 +1,19 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+require("source-map-support/register");
+const weak = require("weak-napi");
 const assert = require("assert");
 const async = require("async");
-const weak = require("weak");
 const path = require("path");
 const util = require("util");
 const fs = require("fs");
+const isWeakRef = function (val) {
+    try {
+        return weak.isWeakRef(val);
+    }
+    catch (e) { }
+    return false;
+};
 const LRU = require("../index");
 const gccache = new LRU;
 const onemb = new Int8Array(1000000);
@@ -85,7 +93,7 @@ const doGenerateTests = function (tests, errorAfter, series = false, setInterval
             const expectError = i > errorAfter;
             const verify = function (p, dat) {
                 const cap = captured[p];
-                assert.equal(weak.isWeakRef(dat), false, "weak reference snuck through...");
+                assert.equal(isWeakRef(dat), false, "weak reference snuck through...");
                 if (dat) {
                     if (cap && dat !== cap)
                         console.warn(p + " did not === previously resolved value");

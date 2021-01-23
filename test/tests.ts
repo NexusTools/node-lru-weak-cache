@@ -1,11 +1,21 @@
 /// <reference types="mocha" />
 
+require("source-map-support/register");
+
+import weak = require("weak-napi");
 import assert = require("assert");
 import async = require("async");
-import weak = require("weak");
 import path = require("path");
 import util = require("util");
 import fs = require("fs");
+
+const isWeakRef = function(val) {
+  try {
+    return weak.isWeakRef(val);
+  } catch(e) {}
+  
+  return false;
+}
 
 import LRU = require("../index");
 
@@ -88,7 +98,7 @@ const doGenerateTests = function(tests: (string[] | string)[][], errorAfter: num
       const expectError = i > errorAfter;
       const verify = function(p: string, dat) {
         const cap = captured[p];
-        assert.equal(weak.isWeakRef(dat), false, "weak reference snuck through...");
+        assert.equal(isWeakRef(dat), false, "weak reference snuck through...");
         if(dat) {
           if (cap && dat !== cap)
             console.warn(p + " did not === previously resolved value");

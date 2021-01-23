@@ -1,5 +1,5 @@
 "use strict";
-const weak = require("weak");
+const weak = require("weak-napi");
 const findError = function (data) {
     var err;
     Object.keys(data).forEach(function (key) {
